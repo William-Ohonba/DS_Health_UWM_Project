@@ -21,6 +21,7 @@ import torch # gives access to tensors and tensor manipulation
 import torch.optim as optim # gives access to Adam optimization
 from torch.optim.lr_scheduler import CosineAnnealingLR # use cosine curve formula to make a learning rate scheduler
 from tqdm import tqdm # allows progress bar
+from pathlib import Path
 
 from dataset       import get_dataloaders, calc_stats, GITractDataset # dataloader wraps dataset and allows handling of dataset, calc_stat allows statistic calculation for dataset(mean, SD), GITrackDataset is the dataset
 from model         import build_model #constructs the UNET model
@@ -37,9 +38,11 @@ _DEVICE = (
     else "cpu"
 ) # if no gpu use cpu, if using nvidia gpu use cuda, if using mac use mps using torch cuda and torch backends
 
+DATA_DIR = Path("data")
+
 BASE_CONFIG = {
-    "csv_path"    : "/Users/jagan/Downloads/uw-madison-gi-tract-image-segmentation/train.csv", # set appropriate path depending on where your train.csv is
-    "folder_path" : "/Users/jagan/Downloads/uw-madison-gi-tract-image-segmentation/train", # set appropriate path for where you train folder is
+    "csv_path"    : str(DATA_DIR / "train.csv"), # set appropriate path depending on where your train.csv is
+    "folder_path" : str(DATA_DIR / "train"), # set appropriate path for where you train folder is
     "stats_path"  : "calcStats.json", #where will your statistics go, in this case calcStats.jjson
     # img_size 224 → ~6× faster than 320; good enough to compare 3- vs 5-slice
     # bump to 320 for the final presentation run
