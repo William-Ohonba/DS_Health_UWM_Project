@@ -1,16 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Apr  6 19:13:06 2026
-
-@author: jagan
-"""
-
+kaggle
+python-dotenv
 numpy >= 1.8
-torch == 2.11.0+cu126
-torchvision >= 0.26
 albumentations >= 2.0
-opencv-python-headless >=4.0
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch >= 2.0
+torchvision >= 0.26
+torchaudio >= 2.0
+opencv-python-headless >= 4.0
 tqdm >= 4.67
 pandas >= 2.0
-segmentation-models-pytorch
