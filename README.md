@@ -8,3 +8,5 @@ This is the repo will all our stuff for the UWM Project submission
 7) go to code folder
 8) python3 train.py --n_slices 3    - for training on 3 slices
 9) python3 train.py --n_slices 5    - for training on 5 slices
+10) If you want to activate tensorboard use tensorboard --logdir runs/
+11) use ssh -L (domain_number):localhost:(domain_number) (username)@(classmachine)
