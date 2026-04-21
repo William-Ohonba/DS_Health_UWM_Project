@@ -1,159 +1,148 @@
 """
 loss.py — Combined BCE + Dice Loss and evaluation metrics
-Implements:
-  - DiceLoss
-  - BCEWithLogitsLoss
-  - CombinedLoss (50/50 BCE + Dice as planned in Pres 3)
-  - dice_coefficient() metric
-  - hausdorff_distance() metric
+
+FIXES applied:
+  [FIX-3]  DiceLoss smooth: 1.0 → 1e-6. Near-zero preds now yield loss≈1.0
+           instead of ≈0.0, restoring Dice gradient signal early in training.
+  [FIX-7]  hausdorff_distance_2d exported so train.py validate() can import
+           and call it directly per-item per-class.
+  [FIX-11] hausdorff_distance_2d returns None (not 0.0) when both masks are
+           empty, so callers skip the pair from the HD mean — matching the
+           skip-both-empty logic in compute_dice_safe(). Previously the 0.0
+           return value was included in the mean, artificially deflating HD
+           (and inflating composite) because ~57% of GI slices are empty.
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 
 try:
     from scipy.spatial.distance import directed_hausdorff
+    _HAVE_SCIPY = True
 except ImportError:
-    directed_hausdorff = None
+    _HAVE_SCIPY = False
 
+
+# ---------------------------------------------------------------------------
+# Dice loss
+# ---------------------------------------------------------------------------
 
 class DiceLoss(nn.Module):
-    def __init__(self, smooth=1.0):
+    """[FIX-3] smooth=1e-6 so near-zero predictions yield loss ≈ 1.0."""
+    def __init__(self, smooth: float = 1e-6):
         super().__init__()
         self.smooth = smooth
 
-    def forward(self, logits, targets):
-        probs  = torch.sigmoid(logits)
-        batch  = probs.shape[0]
-        probs  = probs.view(batch, -1)
-        targets = targets.view(batch, -1)
-
-        intersection = (probs * targets).sum(dim=1)
-        dice = (2.0 * intersection + self.smooth) / (
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        probs   = torch.sigmoid(logits)
+        B       = probs.shape[0]
+        probs   = probs.view(B, -1)
+        targets = targets.view(B, -1)
+        inter   = (probs * targets).sum(dim=1)
+        dice    = (2.0 * inter + self.smooth) / (
             probs.sum(dim=1) + targets.sum(dim=1) + self.smooth
         )
         return 1.0 - dice.mean()
 
 
-class CombinedLoss(nn.Module):
-    """
-    50/50 BCE + Dice loss as specified in Presentation 3 Planned Improvements.
-    Addresses class imbalance better than BCE alone.
-    """
+# ---------------------------------------------------------------------------
+# Combined loss
+# ---------------------------------------------------------------------------
 
-    def __init__(self, bce_weight=0.5, dice_weight=0.5):
+class CombinedLoss(nn.Module):
+    """50/50 BCE + Dice."""
+    def __init__(self, bce_weight: float = 0.5, dice_weight: float = 0.5):
         super().__init__()
         self.bce_weight  = bce_weight
         self.dice_weight = dice_weight
         self.bce         = nn.BCEWithLogitsLoss()
         self.dice        = DiceLoss()
 
-    def forward(self, logits, targets):
-        bce_loss  = self.bce(logits, targets)
-        dice_loss = self.dice(logits, targets)
-        return self.bce_weight * bce_loss + self.dice_weight * dice_loss
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor):
+        return (self.bce_weight  * self.bce(logits, targets)
+              + self.dice_weight * self.dice(logits, targets))
 
 
 # ---------------------------------------------------------------------------
-# Evaluation metrics
+# Hausdorff distance  [FIX-7, FIX-11]
 # ---------------------------------------------------------------------------
 
-@torch.no_grad()
-def dice_coefficient(preds, targets, threshold=0.5, smooth=1.0):
+def hausdorff_distance_2d(pred_mask: np.ndarray,
+                           gt_mask:   np.ndarray):
     """
-    Compute per-class Dice coefficient.
-    Args:
-        preds   : [B, C, H, W] raw logits or probabilities
-        targets : [B, C, H, W] binary masks
-    Returns:
-        dict of {class_name: dice_score}
+    Normalised 2-D symmetric Hausdorff distance.
+
+    Returns
+    -------
+    None   Both masks empty — caller should skip this pair entirely.
+           [FIX-11] Previously returned 0.0, which was counted in the mean
+           and made HD look artificially good because ~57% of slices have
+           no annotation.
+    1.0    Exactly one mask empty (worst case).
+    float  Symmetric normalised HD in (0, 1).
     """
-    classes = ["large_bowel", "small_bowel", "stomach"]
-    if preds.shape == targets.shape and preds.max() > 1:
-        probs = torch.sigmoid(preds)
-    else:
-        probs = preds
-
-    binary = (probs > threshold).float()
-    scores = {}
-
-    for i, cls in enumerate(classes):
-        p = binary[:, i].view(-1)
-        t = targets[:, i].view(-1)
-        intersection = (p * t).sum()
-        dsc = (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
-        scores[cls] = dsc.item()
-
-    scores["mean"] = np.mean(list(scores.values()))
-    return scores
-
-
-def hausdorff_distance_2d(pred_mask, gt_mask):
-    """
-    Compute normalized 2D Hausdorff distance between two binary masks.
-    Returns 0.0 if both masks are empty.
-    """
-    if directed_hausdorff is None:
-        return 0.0
+    if not _HAVE_SCIPY:
+        return None
 
     pred_pts = np.argwhere(pred_mask)
     gt_pts   = np.argwhere(gt_mask)
 
     if len(pred_pts) == 0 and len(gt_pts) == 0:
-        return 0.0
+        return None          # [FIX-11] skip, not perfect
+
     if len(pred_pts) == 0 or len(gt_pts) == 0:
-        return 1.0
+        return 1.0           # one-sided miss
 
-    # Normalize coordinates by image size
-    h, w    = pred_mask.shape
-    pred_n  = pred_pts / np.array([h, w])
-    gt_n    = gt_pts   / np.array([h, w])
+    h, w   = pred_mask.shape
+    pred_n = pred_pts / np.array([h, w], dtype=np.float64)
+    gt_n   = gt_pts   / np.array([h, w], dtype=np.float64)
 
-    d1 = directed_hausdorff(pred_n, gt_n)[0]
-    d2 = directed_hausdorff(gt_n, pred_n)[0]
-    return max(d1, d2)
+    return float(max(directed_hausdorff(pred_n, gt_n)[0],
+                     directed_hausdorff(gt_n, pred_n)[0]))
 
+
+# ---------------------------------------------------------------------------
+# Offline / backward-compat helper
+# ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def compute_metrics(preds, targets, threshold=0.5):
-    """
-    Compute Dice + Hausdorff for a batch.
-    Returns dict matching competition metric format.
-    """
-    classes = ["large_bowel", "small_bowel", "stomach"]
-    probs   = torch.sigmoid(preds).cpu().numpy()
-    binary  = (probs > threshold).astype(np.uint8)
-    targets = targets.cpu().numpy().astype(np.uint8)
+def compute_metrics(preds: torch.Tensor,
+                    targets: torch.Tensor,
+                    threshold: float = 0.5) -> dict:
+    """Dice + Hausdorff for a full batch. Both-empty HD pairs skipped [FIX-11]."""
+    classes    = ["large_bowel", "small_bowel", "stomach"]
+    probs      = torch.sigmoid(preds).cpu().numpy()
+    binary     = (probs > threshold).astype(np.uint8)
+    targets_np = targets.cpu().numpy().astype(np.uint8)
 
-    dice_scores = {cls: [] for cls in classes}
-    hd_scores   = {cls: [] for cls in classes}
+    dice_scores = {c: [] for c in classes}
+    hd_scores   = {c: [] for c in classes}
 
     for b in range(binary.shape[0]):
         for i, cls in enumerate(classes):
-            p_mask = binary[b, i]
-            t_mask = targets[b, i]
-
-            # Dice
+            p_mask, t_mask = binary[b, i], targets_np[b, i]
             inter = (p_mask & t_mask).sum()
-            dsc   = (2.0 * inter + 1.0) / (p_mask.sum() + t_mask.sum() + 1.0)
-            dice_scores[cls].append(dsc)
-
-            # Hausdorff
+            dsc   = (2.0 * inter + 1e-6) / (p_mask.sum() + t_mask.sum() + 1e-6)
+            dice_scores[cls].append(float(dsc))
             hd = hausdorff_distance_2d(p_mask, t_mask)
-            hd_scores[cls].append(hd)
+            if hd is not None:
+                hd_scores[cls].append(hd)
 
     results = {}
     for cls in classes:
-        results[f"dice_{cls}"]        = np.mean(dice_scores[cls])
-        results[f"hausdorff_{cls}"]   = np.mean(hd_scores[cls])
+        results[f"dice_{cls}"]      = float(np.mean(dice_scores[cls]))
+        results[f"hausdorff_{cls}"] = (
+            float(np.mean(hd_scores[cls])) if hd_scores[cls] else float("nan")
+        )
 
-    results["dice_mean"]      = np.mean([results[f"dice_{c}"]       for c in classes])
-    results["hausdorff_mean"] = np.mean([results[f"hausdorff_{c}"]  for c in classes])
+    results["dice_mean"]      = float(np.mean([results[f"dice_{c}"] for c in classes]))
+    valid_hds                 = [results[f"hausdorff_{c}"] for c in classes
+                                 if not np.isnan(results[f"hausdorff_{c}"])]
+    results["hausdorff_mean"] = float(np.mean(valid_hds)) if valid_hds else float("nan")
 
-    # Competition composite score: 0.4 * Dice + 0.6 * (1 - Hausdorff)
+    dm, hm = results["dice_mean"], results["hausdorff_mean"]
     results["composite"] = (
-        0.4 * results["dice_mean"] + 0.6 * (1.0 - results["hausdorff_mean"])
+        0.4 * dm + 0.6 * (1.0 - hm) if not np.isnan(hm) else float("nan")
     )
     return results
