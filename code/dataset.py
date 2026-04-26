@@ -7,14 +7,23 @@ FIXES applied:
   [FIX-5]  /tmp/ split CSVs are now named with the n_slices + img_size
            suffix so parallel runs (n_slices=3 vs 5, img_size=320 vs 448)
            no longer overwrite each other's val split mid-epoch.
-           Previously both runs wrote to the same /tmp/gi_train_split.csv,
-           silently corrupting the val set of whichever started second.
   [FIX-7]  Augmentation now passes a 2-D binary union mask as `mask` (for
            MaskAwareRandomCrop anchor sampling) and the full (H,W,C) array
-           as `multichan` via additional_targets.  Previously the raw
-           (H,W,3) array arrived in `params["mask"]`, making argwhere
-           return (row, col, channel) triples and silently disabling
-           mask-focused cropping on every training sample.
+           as `multichan` via additional_targets.
+  [FIX-22] get_dataloaders() now accepts a `pin_memory` parameter and passes
+           it through to both DataLoaders.
+  [FIX-25] WeightedRandomSampler positive weight reduced from 5.0 → 2.0.
+  [FIX-30] WeightedRandomSampler removed entirely.
+           The 2:1 positive oversampling (FIX-25) still caused a systematic
+           train/val calibration mismatch: the model trained on ~67% positive
+           slices but validated on ~43% (natural distribution, 57% empty GT).
+           This was the primary cause of the optimal threshold oscillating
+           between 0.35 and 0.50 epoch-to-epoch and empty_pred% swinging
+           26%→50%: the model's sigmoid outputs were calibrated for the wrong
+           prior at validation time. Loss class weights (computed per pixel
+           frequency in train.py) already compensate for class imbalance at
+           the gradient level; the sampler was redundant with those weights
+           and actively harmful to calibration. Replaced with shuffle=True.
 """
 
 import os
@@ -23,7 +32,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import torch
-from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 
 
@@ -125,17 +134,7 @@ class GITractDataset(Dataset):
         else:
             self.mean = self.std = None
 
-        self.ids     = self.df["id"].unique()
-        self.weights = self._compute_weights()
-
-    def _compute_weights(self):
-        """Upweight slices that contain at least one organ (5:1 ratio)."""
-        mask_present = (
-            self.df.groupby("id")["segmentation"]
-            .apply(lambda x: x.notna().any())
-        )
-        return [5.0 if mask_present.get(sid, False) else 1.0
-                for sid in self.ids]
+        self.ids = self.df["id"].unique()
 
     def _parse_id(self, sample_id: str):
         parts    = sample_id.split("_")
@@ -220,7 +219,7 @@ class GITractDataset(Dataset):
                 mask      = union_mask,      # 2-D for anchor sampling
                 multichan = multichan_hw,    # full (H,W,3) gets same spatial tx
             )
-            aug_mid  = result["image"]                       # (new_H, new_W)
+            aug_mid  = result["image"]                         # (new_H, new_W)
             mask     = result["multichan"].transpose(2, 0, 1)  # (3, new_H, new_W)
 
             new_h, new_w = aug_mid.shape
@@ -248,15 +247,26 @@ class GITractDataset(Dataset):
 def get_dataloaders(
     csv_path:      str,
     folder_path:   str,
-    img_size:      int  = 320,
-    batch_size:    int  = 16,
-    n_slices:      int  = 3,
-    stats_path:    str  = "calcStats.json",
-    train_augment        = None,
+    img_size:      int   = 320,
+    batch_size:    int   = 16,
+    n_slices:      int   = 3,
+    stats_path:    str   = "calcStats.json",
+    train_augment         = None,
     val_split:     float = 0.2,
-    num_workers:   int  = 4,
+    num_workers:   int   = 4,
+    pin_memory:    bool  = True,   # [FIX-22] threaded from cfg["pin_memory"]
 ):
-    """Build train and validation DataLoaders with weighted sampling."""
+    """
+    Build train and validation DataLoaders.
+
+    [FIX-22] pin_memory is now a parameter (default True for backward compat)
+    rather than being hardcoded. train.py passes cfg["pin_memory"] which is
+    True only on CUDA.
+    [FIX-30] WeightedRandomSampler removed. Previously 2:1 positive
+    oversampling (FIX-25) caused a systematic train/val calibration mismatch.
+    Replaced with shuffle=True. Loss class weights in train.py compensate
+    for pixel-level class imbalance without distorting the slice distribution.
+    """
     df      = pd.read_csv(csv_path)
     all_ids = df["id"].unique()
     n_val   = int(len(all_ids) * val_split)
@@ -281,20 +291,17 @@ def get_dataloaders(
     val_ds   = GITractDataset(val_csv,   folder_path, img_size, stats_path,
                               None,        n_slices, "val")
 
-    sampler = WeightedRandomSampler(
-        weights     = torch.tensor(train_ds.weights, dtype=torch.float64),
-        num_samples = len(train_ds),
-        replacement = True,
-    )
-
+    # [FIX-30] shuffle=True replaces WeightedRandomSampler.
+    # The sampler was causing a train/val distribution mismatch that made
+    # the model's optimal threshold oscillate; see module docstring.
     train_loader = DataLoader(
-        train_ds, batch_size=batch_size, sampler=sampler,
-        num_workers=num_workers, pin_memory=True,
+        train_ds, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, pin_memory=pin_memory,   # [FIX-22]
         persistent_workers=(num_workers > 0),
     )
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True,
+        num_workers=num_workers, pin_memory=pin_memory,   # [FIX-22]
         persistent_workers=(num_workers > 0),
     )
     return train_loader, val_loader

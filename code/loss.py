@@ -7,10 +7,14 @@ FIXES applied:
   [FIX-7]  hausdorff_distance_2d exported so train.py validate() can import
            and call it directly per-item per-class.
   [FIX-11] hausdorff_distance_2d returns None (not 0.0) when both masks are
-           empty, so callers skip the pair from the HD mean — matching the
-           skip-both-empty logic in compute_dice_safe(). Previously the 0.0
-           return value was included in the mean, artificially deflating HD
-           (and inflating composite) because ~57% of GI slices are empty.
+           empty, so callers skip the pair from the HD mean.
+  [FIX-26] compute_metrics uses smooth=1.0 in the METRIC (not the loss) so
+           small-structure classes don't report a misleadingly near-zero Dice.
+  [FIX-32] DiceLoss smooth raised from 1e-6 → 1e-4.
+           With 57% empty slices, smooth=1e-6 caused loss→0 on both-empty
+           pairs, making "predict nothing" a local optimum. 1e-4 keeps a
+           gradient signal flowing without materially affecting non-empty
+           predictions. The metric still uses smooth=1.0 (FIX-26).
 """
 
 import torch
@@ -25,12 +29,15 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Dice loss
+# Dice loss  [FIX-32] smooth=1e-4
 # ---------------------------------------------------------------------------
 
 class DiceLoss(nn.Module):
-    """[FIX-3] smooth=1e-6 so near-zero predictions yield loss ≈ 1.0."""
-    def __init__(self, smooth: float = 1e-6):
+    """
+    [FIX-32] smooth=1e-4 (was 1e-6).
+    Prevents zero-gradient trap on both-empty slice pairs (57% of dataset).
+    """
+    def __init__(self, smooth: float = 1e-4):
         super().__init__()
         self.smooth = smooth
 
@@ -75,10 +82,7 @@ def hausdorff_distance_2d(pred_mask: np.ndarray,
 
     Returns
     -------
-    None   Both masks empty — caller should skip this pair entirely.
-           [FIX-11] Previously returned 0.0, which was counted in the mean
-           and made HD look artificially good because ~57% of slices have
-           no annotation.
+    None   Both masks empty — caller should skip this pair entirely. [FIX-11]
     1.0    Exactly one mask empty (worst case).
     float  Symmetric normalised HD in (0, 1).
     """
@@ -89,10 +93,10 @@ def hausdorff_distance_2d(pred_mask: np.ndarray,
     gt_pts   = np.argwhere(gt_mask)
 
     if len(pred_pts) == 0 and len(gt_pts) == 0:
-        return None          # [FIX-11] skip, not perfect
+        return None
 
     if len(pred_pts) == 0 or len(gt_pts) == 0:
-        return 1.0           # one-sided miss
+        return 1.0
 
     h, w   = pred_mask.shape
     pred_n = pred_pts / np.array([h, w], dtype=np.float64)
@@ -110,7 +114,11 @@ def hausdorff_distance_2d(pred_mask: np.ndarray,
 def compute_metrics(preds: torch.Tensor,
                     targets: torch.Tensor,
                     threshold: float = 0.5) -> dict:
-    """Dice + Hausdorff for a full batch. Both-empty HD pairs skipped [FIX-11]."""
+    """
+    Dice + Hausdorff for a full batch.
+    [FIX-11] Both-empty HD pairs skipped.
+    [FIX-26] smooth=1.0 in metric.
+    """
     classes    = ["large_bowel", "small_bowel", "stomach"]
     probs      = torch.sigmoid(preds).cpu().numpy()
     binary     = (probs > threshold).astype(np.uint8)
@@ -123,7 +131,7 @@ def compute_metrics(preds: torch.Tensor,
         for i, cls in enumerate(classes):
             p_mask, t_mask = binary[b, i], targets_np[b, i]
             inter = (p_mask & t_mask).sum()
-            dsc   = (2.0 * inter + 1e-6) / (p_mask.sum() + t_mask.sum() + 1e-6)
+            dsc   = (2.0 * inter + 1.0) / (p_mask.sum() + t_mask.sum() + 1.0)
             dice_scores[cls].append(float(dsc))
             hd = hausdorff_distance_2d(p_mask, t_mask)
             if hd is not None:
