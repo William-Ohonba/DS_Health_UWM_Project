@@ -15,6 +15,7 @@ FIXES applied:
 
   [FIX-8]  GaussNoise: removed the deprecated `var_limit` kwarg; replaced
            with `std_range=(0.04, 0.22)` which is the correct API for
+<<<<<<< HEAD
            Albumentations >= 1.4 and silences the UserWarning that was
            printed at the start of every training run.
 
@@ -42,6 +43,11 @@ FIXES applied:
            value) and `fill_mask` (mask fill value). Updated all three
            transforms accordingly.
 
+=======
+           Albumentations ≥ 1.4 and silences the UserWarning that was
+           printed at the start of every training run.
+
+>>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
 Pipeline is applied to the CENTER slice + all masks inside dataset.py.
 Neighbor slices are spatially resized to match augmented dims but do not
 receive intensity augmentations (FIX-1 — unchanged from previous version).
@@ -143,6 +149,7 @@ def get_train_augmentations(img_size: int = 320) -> A.Compose:
         # 2. Geometric
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.1),
+<<<<<<< HEAD
 
         # [FIX-33] A.Affine replaces ShiftScaleRotate.
         # translate_percent matches the old shift_limit=0.05 (±5% of image
@@ -170,23 +177,43 @@ def get_train_augmentations(img_size: int = 320) -> A.Compose:
             fill=0,
             fill_mask=0,
             p=0.4,
+=======
+        A.ShiftScaleRotate(
+            shift_limit=0.05, scale_limit=0.1, rotate_limit=15,
+            border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0, p=0.5,
+        ),
+
+        # 3. Deformation
+        A.ElasticTransform(
+            alpha=120, sigma=6, alpha_affine=3,
+            border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0, p=0.4,
+>>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
         ),
         # [FIX-34] value/mask_value → fill/fill_mask.
         A.GridDistortion(
             num_steps=5, distort_limit=0.3,
+<<<<<<< HEAD
             border_mode=cv2.BORDER_CONSTANT,
             fill=0,
             fill_mask=0,
             p=0.3,
+=======
+            border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0, p=0.3,
+>>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
         ),
         # [FIX-18] shift_limit_x/y (already correct from prior fix).
         # [FIX-34] value/mask_value → fill/fill_mask.
         A.OpticalDistortion(
+<<<<<<< HEAD
             distort_limit=0.2,
             border_mode=cv2.BORDER_CONSTANT,
             fill=0,
             fill_mask=0,
             p=0.2,
+=======
+            distort_limit=0.2, shift_limit=0.1,
+            border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0, p=0.2,
+>>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
         ),
 
         # 4. Mask-aware crop
@@ -195,7 +222,11 @@ def get_train_augmentations(img_size: int = 320) -> A.Compose:
 
         # 5. Intensity
         A.RandomBrightnessContrast(
+<<<<<<< HEAD
             brightness_limit=0.2, contrast_limit=0.2, p=0.4,
+=======
+            brightness_limit=0.2, contrast_limit=0.2, p=0.4
+>>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
         ),
         # [FIX-8] std_range replaces deprecated var_limit
         A.GaussNoise(std_range=(0.04, 0.22), p=0.2),
