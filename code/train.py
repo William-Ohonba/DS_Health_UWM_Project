@@ -7,34 +7,37 @@ Fixes applied (cumulative):
   [FIX-3]  Dice loss smooth: 1.0 → 1e-6  (restores gradient signal)
   [FIX-4]  Differential LR: encoder=3e-5, decoder/head=3e-4
   [FIX-5]  calcStats.json stale-stats warning on startup
+           /tmp/ split CSVs now namespaced by n_slices+img_size (dataset.py)
   [FIX-6]  Dice threshold: 0.5 → 0.3 in compute_dice_safe during validation
   [FIX-7]  Hausdorff Distance actually computed in validate()
-  [FIX-8]  Small bowel class weight boosted x1.5
-  [FIX-9]  Sampler generator reassignment removed
+           augmentations.py / dataset.py: union mask passed for crop anchor
+  [FIX-8]  Small bowel class weight boosted x1.5 after frequency calculation
+  [FIX-9]  Sampler generator reassignment removed — it was a no-op
   [FIX-10] GradScaler state saved + restored in crash checkpoint
-  [FIX-11] hausdorff_distance_2d returns None for both-empty pairs
-  [FIX-12] Dice and HD evaluated at the SAME threshold
-  [FIX-13] HD computed every HD_EVAL_EVERY epochs on HD_EVAL_BATCHES batches
+  [FIX-11] hausdorff_distance_2d returns None for both-empty pairs (loss.py)
+  [FIX-12] Dice and HD now both evaluated at the SAME threshold (0.3)
+  [FIX-13] HD computed only every HD_EVAL_EVERY epochs (default 5) and on
+           a random subsample of HD_EVAL_BATCHES batches (default 40).
   [FIX-14] save_mask_overlay wraps body in try/finally
   [FIX-15] Threshold sweep: after every epoch
-  [FIX-16] validate(): logits_cache capped at SWEEP_CACHE_BATCHES
-  [FIX-17] train_one_epoch(): AMP branch unpacks _forward() into loss
+  [FIX-16] validate(): logits_cache capped at SWEEP_CACHE_BATCHES (200)
+  [FIX-17] train_one_epoch(): AMP branch now unpacks _forward() into `loss`
   [FIX-18] augmentations.py: alpha_affine removed, shift_limit split
   [FIX-19] Best-model checkpoint saved on composite score when HD available
   [FIX-20] valid_pairs diagnostic reads pre-computed counts
   [FIX-21] ReduceLROnPlateau added as secondary scheduler
   [FIX-22] get_dataloaders() pin_memory threaded through from cfg
-  [FIX-23] Encoder LR raised from 3e-5 → 1e-4; LR ratio reduced 10x → 3x
-  [FIX-24] SequentialLR + ReduceLROnPlateau conflict resolved
+  [FIX-23] Encoder LR raised from 3e-5 → 1e-4; LR ratio reduced from 10x to 3x
+  [FIX-24] SequentialLR + ReduceLROnPlateau conflict resolved.
   [FIX-25] dataset.py: WeightedRandomSampler weight 5.0 → 2.0
-  [FIX-26] loss.py: smooth=1.0 in metric (not loss)
+  [FIX-26] loss.py: smooth=1.0 in metric (not loss) for small structures
   [FIX-27] model.py: Dropout2d(0.2) before segmentation head
   [FIX-28] (same as FIX-24, cross-reference)
-  [FIX-29] best_score comparison: dice_mean is always primary metric
+  [FIX-29] best_score comparison normalised: dice_mean is always primary metric
   [FIX-30] Auxiliary presence detection head added to model.py
   [FIX-31] model.py: presence_head operates on detached encoder features
   [FIX-32] loss.py: Dice smooth raised 1e-6 → 1e-4
-  [FIX-33] Plateau scheduler monitors negated dice_mean, not val_loss
+  [FIX-33] Plateau scheduler now monitors negated dice_mean, not val_loss
   [FIX-34] PRESENCE_LOSS_WEIGHT annealed 0.0 → 0.3 over first 10 epochs
   [FIX-35] Gradient norm logged to TensorBoard every update step
   [FIX-36] Early stopping with best-weight restoration
@@ -49,42 +52,40 @@ Fixes applied (cumulative):
   [FIX-45] Early-stop counter and best_dice reset after encoder unfreeze
   [FIX-46] EMA state reset at encoder unfreeze boundary
   [FIX-47] Plateau scheduler not stepped during encoder-frozen epochs
-  [FIX-48] Early stop patience raised 20 → 35, min_epochs raised 15 → 25
-  [FIX-49] Plateau patience raised 3 → 8, factor 0.4 → 0.5
-  [FIX-50] EMA alpha raised 0.3 → 0.6
-  [FIX-51] min_lr raised 1e-7 → 5e-6
-  [FIX-52] HD loss term added to training objective.
-           Root cause of composite plateau at 0.42: dice_mean was 0.32
-           but HD_mean was stubbornly 0.51 (stomach HD consistently 0.625).
-           The model was learning to detect organ presence and rough region
-           but had no gradient signal incentivising boundary precision.
-           BCE+Dice losses are both pixel-wise and do not penalise
-           spatially-dispersed predictions. Adding a soft boundary loss
-           (gradient magnitude of prediction vs gradient magnitude of GT)
-           provides direct spatial precision supervision.
-           The boundary loss is computed as 1 - F1(pred_edges, gt_edges)
-           where edges are extracted via a 3x3 Laplacian on the sigmoid
-           probabilities. Weight HD_LOSS_WEIGHT=0.2, annealed from 0
-           over HD_LOSS_ANNEAL_EPOCHS=5 so it does not destabilise early
-           training before the model has learned basic organ presence.
-  [FIX-53] img_size raised 320 → 384 in BASE_CONFIG.
-           At 320px the stomach (largest organ, ~15% of slice area) has
-           adequate resolution, but small bowel tubular structures
-           (~2-4px wide at 320px) are below the effective resolution of
-           the EfficientNet-B5 encoder's stride-32 bottleneck. At 384px
-           small bowel structures are ~3-5px wide, sufficient for the
-           decoder to reconstruct accurate boundaries. This directly
-           targets the small_bowel HD (currently 0.31-0.40) and dice
-           (currently 0.29-0.30) which are the weakest per-class metrics.
-           Memory cost: ~44% more pixels per forward pass; batch_size
-           reduced 8 → 6 to compensate.
-  [FIX-54] HD_EVAL_BATCHES raised 40 → 80.
-           At 40 batches x 6 = 240 samples the HD estimate had high
-           variance epoch-to-epoch (stomach HD ranging 0.576–0.642 in
-           consecutive epochs despite stable model weights). This variance
-           was making the composite score noisy, causing best-model
-           checkpoints to be saved on lucky HD epochs rather than truly
-           better models. 80 batches gives a more stable estimate.
+  [FIX-48] Early stop patience raised 20 → 35, min_epochs raised 15 → 25.
+           Root cause of premature termination at epoch 49: the model's
+           best dice (0.321 at epoch 29) was followed by 20 consecutive
+           epochs all within 0.01 of that best, which is normal noise for
+           this dataset at a nearly-converged LR. Patience=20 treated this
+           as a true plateau and stopped training while the model was
+           actively producing competitive scores. Raising to 35 gives the
+           model enough runway to benefit from LR reductions and find a
+           new best.
+  [FIX-49] Plateau patience raised 3 → 8, factor 0.4 → 0.5.
+           With patience=3 on EMA-smoothed neg_dice, the LR was reduced
+           every 3-4 epochs of flat EMA, crashing to 1.28e-06 by epoch 44
+           (effectively zero — min_lr=1e-7 is one more halving away).
+           At lr=1.28e-06 the model cannot escape any local optimum
+           regardless of how much patience the early stopping gives it.
+           patience=8 means the LR only drops after 8 truly flat epochs
+           (not 3 noisy ones), and factor=0.5 (was 0.4) makes each drop
+           less aggressive so more reductions remain useful before hitting
+           min_lr.
+  [FIX-50] EMA alpha raised 0.3 → 0.6.
+           With alpha=0.3, the EMA had a time constant of ~3 epochs,
+           meaning it was still heavily influenced by epochs 3-5 epochs
+           ago. This caused the plateau scheduler to see a signal that
+           lagged the actual dice by several epochs, triggering reductions
+           right when dice was genuinely improving. alpha=0.6 tracks the
+           current dice more closely (time constant ~1.7 epochs) while
+           still filtering single-epoch noise.
+  [FIX-51] min_lr raised 1e-7 → 5e-6.
+           At lr < 5e-6 the effective weight update per step is smaller
+           than numerical precision for float16 gradients and provides no
+           meaningful optimisation. Stopping plateau reductions at 5e-6
+           prevents the model from entering a permanently frozen state
+           while still allowing significant LR reduction from the initial
+           5e-5 encoder / 1e-4 decoder rates.
 
 Run:
     python train.py --n_slices 3
@@ -105,7 +106,6 @@ import argparse
 import multiprocessing
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import LinearLR, ReduceLROnPlateau
@@ -135,27 +135,24 @@ IDX_SMALL_BOWEL = 1
 IDX_STOMACH     = 2
 
 HD_EVAL_EVERY   = 1
-HD_EVAL_BATCHES = 80   # [FIX-54] raised from 40
+HD_EVAL_BATCHES = 80
 
-THRESHOLD_SWEEP = [0.25, 0.30, 0.35, 0.40, 0.45, 0.50]  # [FIX-37]
+# [FIX-37] Lower bound raised 0.20 → 0.25
+THRESHOLD_SWEEP = [0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
 
 SWEEP_CACHE_BATCHES = 99_999
 
 PRESENCE_LOSS_WEIGHT   = 0.3
 PRESENCE_ANNEAL_EPOCHS = 10   # [FIX-34]
 
-# [FIX-52] Boundary loss weight and anneal schedule
-HD_LOSS_WEIGHT        = 0.2
-HD_LOSS_ANNEAL_EPOCHS = 5
-
-# [FIX-48]
+# [FIX-48] Raised from 20 → 35; min_epochs raised from 15 → 25
 EARLY_STOP_PATIENCE = 35
 MIN_EPOCHS          = 25
 
 # [FIX-44]
 FREEZE_ENCODER_EPOCHS = 3
 
-# [FIX-50]
+# [FIX-50] Raised from 0.3 → 0.6 for tighter tracking of current dice
 EMA_ALPHA = 0.6
 
 
@@ -191,11 +188,12 @@ BASE_CONFIG = {
     "csv_path"     : str(DATA_DIR / "train.csv"),
     "folder_path"  : str(DATA_DIR / "train"),
     "stats_path"   : "calcStats.json",
-    "img_size"     : 384,    # [FIX-53] raised from 320
-    "batch_size"   : 6,      # [FIX-53] reduced from 8 to fit 384px
-    "accum_steps"  : 3,      # keep effective batch ~18 (was 8x2=16)
+    "img_size"     : 320,
+    "batch_size"   : 8,
+    "accum_steps"  : 2,
     "epochs"       : 100,
-    "lr"           : 5e-5,   # [FIX-39]
+    # [FIX-39] encoder LR 5e-5, decoder 2x
+    "lr"           : 5e-5,
     "lr_ratio"     : 2,
     "warmup_epochs": 5,
     "device"       : _DEVICE,
@@ -204,64 +202,64 @@ BASE_CONFIG = {
 
 
 # ---------------------------------------------------------------------------
-# Anneal helpers
+# Presence loss weight annealing  [FIX-34]
 # ---------------------------------------------------------------------------
 
 def get_presence_weight(epoch: int) -> float:
-    """[FIX-34] Linearly ramp 0 → PRESENCE_LOSS_WEIGHT."""
+    """Linearly ramp 0 → PRESENCE_LOSS_WEIGHT over PRESENCE_ANNEAL_EPOCHS."""
     if epoch >= PRESENCE_ANNEAL_EPOCHS:
         return PRESENCE_LOSS_WEIGHT
     return PRESENCE_LOSS_WEIGHT * (epoch / PRESENCE_ANNEAL_EPOCHS)
-
 
 def get_hd_loss_weight(epoch: int) -> float:
     """[FIX-52] Linearly ramp 0 → HD_LOSS_WEIGHT over HD_LOSS_ANNEAL_EPOCHS."""
     if epoch >= HD_LOSS_ANNEAL_EPOCHS:
         return HD_LOSS_WEIGHT
     return HD_LOSS_WEIGHT * (epoch / HD_LOSS_ANNEAL_EPOCHS)
-
-
+ 
+ 
 # ---------------------------------------------------------------------------
 # Boundary (soft-HD) loss  [FIX-52]
 # ---------------------------------------------------------------------------
-
+ 
 # 3x3 Laplacian kernel for edge detection
 _LAPLACIAN = torch.tensor(
     [[0.,  1., 0.],
      [1., -4., 1.],
      [0.,  1., 0.]], dtype=torch.float32
 ).view(1, 1, 3, 3)
-
-
+ 
+ 
 def boundary_loss(seg_logits: torch.Tensor,
                   targets: torch.Tensor) -> torch.Tensor:
     """
     Soft boundary loss: 1 - F1(pred_edges, gt_edges).
     Edges extracted via Laplacian on sigmoid probs (pred) and float targets.
     Operates per-class, returns scalar mean.
-
+ 
     [FIX-52] This gives the model a direct gradient signal for boundary
     precision, which pure Dice/BCE lack. Targeting the HD gap.
     """
     B, C, H, W = seg_logits.shape
     device = seg_logits.device
-
+ 
     kernel = _LAPLACIAN.to(device)  # [1,1,3,3]
     # Expand kernel for C-channel grouped conv
     kernel_c = kernel.expand(C, 1, 3, 3)  # [C,1,3,3]
-
+ 
     probs = torch.sigmoid(seg_logits)  # [B,C,H,W]
-
+ 
     # Extract edges via Laplacian magnitude, clamp to [0,1]
     pred_edges = F.conv2d(probs,    kernel_c, padding=1, groups=C).abs().clamp(0, 1)
     gt_edges   = F.conv2d(targets,  kernel_c, padding=1, groups=C).abs().clamp(0, 1)
-
+ 
     smooth = 1e-6
     inter  = (pred_edges * gt_edges).sum(dim=(2, 3))          # [B,C]
     denom  = pred_edges.sum(dim=(2, 3)) + gt_edges.sum(dim=(2, 3))  # [B,C]
     f1     = (2.0 * inter + smooth) / (denom + smooth)        # [B,C]
-
+ 
     return 1.0 - f1.mean()
+ 
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +268,7 @@ def boundary_loss(seg_logits: torch.Tensor,
 
 def compute_class_weights(loader, n_classes: int = 3,
                           device: str = "cpu") -> torch.Tensor:
-    """[FIX-8] Inverse-frequency weights; small bowel boosted x1.5."""
+    """Inverse-frequency weights; small bowel boosted x1.5 [FIX-8]."""
     print("Computing per-class pixel frequencies for loss weighting ...")
     class_pixel_sum = np.zeros(n_classes, dtype=np.float64)
     total_pixels    = 0
@@ -306,7 +304,7 @@ class WeightedPerClassCombinedLoss(torch.nn.Module):
         self.bce    = torch.nn.BCEWithLogitsLoss(reduction="none")
 
     def _dice_loss(self, logits, targets, smooth: float = 1e-4):
-        # [FIX-32]
+        # [FIX-32] smooth=1e-4 prevents zero-gradient trap on empty slices
         probs = torch.sigmoid(logits)
         inter = (probs * targets).sum(dim=(2, 3))
         denom = probs.sum(dim=(2, 3)) + targets.sum(dim=(2, 3))
@@ -327,6 +325,7 @@ class WeightedPerClassCombinedLoss(torch.nn.Module):
 # ---------------------------------------------------------------------------
 
 def compute_dice_at_threshold(logits_list, masks_list, threshold, smooth=1.0):
+    """Per-class Dice; skips both-empty pairs; smooth=1.0 in metric [FIX-26]."""
     per_class    = {c: [] for c in CLASS_NAMES}
     valid_counts = {c: 0  for c in CLASS_NAMES}
 
@@ -362,6 +361,7 @@ def compute_dice_at_threshold(logits_list, masks_list, threshold, smooth=1.0):
 
 
 def sweep_threshold(logits_list, masks_list):
+    """[FIX-37] Sweep from 0.25; return (best_t, best_dice, all_results)."""
     best_t      = THRESHOLD_SWEEP[0]
     best_dice   = -1.0
     all_results = {}
@@ -384,6 +384,7 @@ def sweep_threshold(logits_list, masks_list):
 @torch.no_grad()
 def save_mask_overlay(model, sample_img, sample_mask,
                       save_path, epoch, device, threshold=0.5):
+    """[FIX-14] try/finally ensures model.train() is always restored."""
     model.eval()
     try:
         img_t = sample_img.unsqueeze(0).to(device)
@@ -446,7 +447,7 @@ def save_mask_overlay(model, sample_img, sample_mask,
                     facecolor=fig.get_facecolor())
         plt.close(fig)
     finally:
-        model.train()   # [FIX-14]
+        model.train()
 
 
 # ---------------------------------------------------------------------------
@@ -465,9 +466,9 @@ def parse_args():
 def build_run_config(n_slices, fast, upscale):
     cfg              = BASE_CONFIG.copy()
     cfg["n_slices"]  = n_slices
-    cfg["img_size"]  = 448 if upscale else BASE_CONFIG["img_size"]
+    cfg["img_size"]  = 448 if upscale else 320
     cfg["num_workers"] = optimal_workers(_DEVICE)
-    suffix           = "_448" if upscale else f"_{cfg['img_size']}"
+    suffix           = "_448" if upscale else "_320"
     cfg["checkpoint"]       = f"best_model_{n_slices}slice{suffix}.pth"
     cfg["crash_checkpoint"] = f"crash_recovery_{n_slices}slice.pth"
     cfg["log_file"]         = f"training_log_{n_slices}slice.json"
@@ -488,6 +489,7 @@ def build_run_config(n_slices, fast, upscale):
 # ---------------------------------------------------------------------------
 
 def set_encoder_trainable(model, trainable: bool):
+    """Freeze or unfreeze the SMP encoder parameters."""
     for p in model.model.encoder.parameters():
         p.requires_grad = trainable
     state = "unfrozen" if trainable else "frozen"
@@ -505,12 +507,11 @@ def train_one_epoch(model, loader, optimizer, criterion,
     total_loss = 0.0
     n_batches  = 0
 
-    presence_weight = get_presence_weight(epoch)   # [FIX-34]
-    hd_weight       = get_hd_loss_weight(epoch)    # [FIX-52]
+    presence_weight = get_presence_weight(epoch)  # [FIX-34]
 
     pbar = tqdm(loader, desc=f"Epoch {epoch} Train", leave=False)
 
-    # [FIX-38] clean window-based accumulation
+    # [FIX-38] Clean window-based accumulation
     optimizer.zero_grad()
     accum_count = 0
 
@@ -524,14 +525,12 @@ def train_one_epoch(model, loader, optimizer, criterion,
         if scaler is not None:
             with torch.amp.autocast("cuda"):
                 loss, per_class = _forward(
-                    model, criterion, imgs, masks,
-                    presence_weight, hd_weight
+                    model, criterion, imgs, masks, presence_weight
                 )
             scaler.scale(loss / accum_steps).backward()
         else:
             loss, per_class = _forward(
-                model, criterion, imgs, masks,
-                presence_weight, hd_weight
+                model, criterion, imgs, masks, presence_weight
             )
             (loss / accum_steps).backward()
 
@@ -544,7 +543,7 @@ def train_one_epoch(model, loader, optimizer, criterion,
             if scaler is not None:
                 scaler.unscale_(optimizer)
 
-            # [FIX-35] log pre-clip gradient norm
+            # [FIX-35] Log pre-clip gradient norm
             grad_norm = sum(
                 p.grad.data.norm(2).item() ** 2
                 for p in model.parameters() if p.grad is not None
@@ -571,33 +570,21 @@ def train_one_epoch(model, loader, optimizer, criterion,
         for c, cname in enumerate(CLASS_NAMES):
             writer.add_scalar(f"Batch/loss_{cname}", per_class[c].item(), global_step)
 
-        pbar.set_postfix(loss=f"{loss_val:.4f}",
-                         pw=f"{presence_weight:.2f}",
-                         bw=f"{hd_weight:.2f}")
+        pbar.set_postfix(loss=f"{loss_val:.4f}", pw=f"{presence_weight:.2f}")
 
     return total_loss / max(n_batches, 1), global_step
 
 
-def _forward(model, criterion, imgs, masks,
-             presence_weight=0.3, hd_weight=0.2):
-    """
-    Seg loss + presence loss + boundary loss.
-    [FIX-52] boundary_loss provides HD-reduction gradient signal.
-    """
+def _forward(model, criterion, imgs, masks, presence_weight=0.3):
+    """Seg loss + annealed presence loss [FIX-34]. Presence detached [FIX-31]."""
     seg_logits, presence_logits = model(imgs)
-
     seg_loss, per_class = criterion(seg_logits, masks)
 
-    # Presence auxiliary loss [FIX-30/34]
     presence_labels = (masks.sum(dim=(2, 3)) > 0).float()
     presence_loss   = F.binary_cross_entropy_with_logits(
         presence_logits, presence_labels
     )
-
-    # Boundary loss [FIX-52]
-    bd_loss = boundary_loss(seg_logits, masks)
-
-    loss = seg_loss + presence_weight * presence_loss + hd_weight * bd_loss
+    loss = seg_loss + presence_weight * presence_loss
     return loss, per_class
 
 
@@ -608,7 +595,8 @@ def _forward(model, criterion, imgs, masks,
 @torch.no_grad()
 def validate(model, loader, criterion, device, fast,
              epoch=1, compute_hd=False, fast_limit=50,
-             presence_weight=0.3, hd_weight=0.2):
+             presence_weight=0.3):
+    """[FIX-33] Returns neg_dice for plateau. [FIX-34] annealed weight."""
     model.eval()
     total_loss   = 0.0
     n_batches    = 0
@@ -636,10 +624,7 @@ def validate(model, loader, criterion, device, fast,
         presence_loss_v   = F.binary_cross_entropy_with_logits(
             presence_logits, presence_labels_v
         )
-        bd_loss_v     = boundary_loss(seg_logits, masks)
-        combined_loss = (seg_loss
-                         + presence_weight * presence_loss_v
-                         + hd_weight * bd_loss_v)
+        combined_loss = seg_loss + presence_weight * presence_loss_v
 
         total_loss += combined_loss.item()
         n_batches  += 1
@@ -756,21 +741,21 @@ def main():
     print(f"\n{'='*60}")
     print(f"  GI Tract Segmentation — {cfg['n_slices']}-slice experiment")
     print(f"  Device            : {device}")
-    print(f"  img_size          : {cfg['img_size']}  [FIX-53]")
-    print(f"  batch_size        : {cfg['batch_size']}  [FIX-53]")
-    print(f"  accum_steps       : {cfg['accum_steps']}")
     print(f"  Encoder LR        : {cfg['lr']:.2e}")
     print(f"  Decoder LR        : {cfg['lr']*lr_ratio:.2e}  ({lr_ratio}x)")
     print(f"  Weight decay      : 1e-3  [FIX-41]")
-    print(f"  Boundary loss     : w={HD_LOSS_WEIGHT} anneal={HD_LOSS_ANNEAL_EPOCHS}ep  [FIX-52]")
     print(f"  Encoder freeze    : first {FREEZE_ENCODER_EPOCHS} epochs  [FIX-44]")
-    print(f"  Warmup            : {cfg['warmup_epochs']} epochs")
-    print(f"  Plateau           : patience=8 factor=0.5 min_lr=5e-6  [FIX-49/51]")
+    print(f"  Unfreeze resets   : best_dice / counter / EMA  [FIX-45/46]")
+    print(f"  Plateau gated     : no step while frozen  [FIX-47]")
+    print(f"  Warmup            : {cfg['warmup_epochs']} epochs → plateau-only")
+    print(f"  Plateau           : patience=8 factor=0.5 neg_dice  [FIX-49]")
+    print(f"  min_lr            : 5e-6  [FIX-51]")
     print(f"  EMA alpha         : {EMA_ALPHA}  [FIX-50]")
-    print(f"  HD eval batches   : {HD_EVAL_BATCHES}  [FIX-54]")
-    print(f"  Threshold sweep   : {THRESHOLD_SWEEP}")
-    print(f"  Presence anneal   : 0→{PRESENCE_LOSS_WEIGHT} over {PRESENCE_ANNEAL_EPOCHS}ep")
-    print(f"  Early stop        : patience={EARLY_STOP_PATIENCE} min_ep={MIN_EPOCHS}  [FIX-48]")
+    print(f"  Threshold sweep   : {THRESHOLD_SWEEP}  [FIX-37]")
+    print(f"  Presence anneal   : 0→{PRESENCE_LOSS_WEIGHT} over "
+          f"{PRESENCE_ANNEAL_EPOCHS} ep  [FIX-34]")
+    print(f"  Early stop        : patience={EARLY_STOP_PATIENCE} "
+          f"min_ep={MIN_EPOCHS}  [FIX-48]")
     print(f"  Checkpoint        : {cfg['checkpoint']}")
     print(f"  TensorBoard       : runs/{cfg['tb_run_name']}")
     print(f"{'='*60}\n")
@@ -878,7 +863,9 @@ def main():
         total_iters=warmup_epochs,
     )
 
-    # [FIX-49/51] patience=8, factor=0.5, min_lr=5e-6
+    # [FIX-49] patience=8, factor=0.5 — less aggressive than before
+    # [FIX-51] min_lr=5e-6 — prevents LR from reaching effectively zero
+    # [FIX-33] mode="min" on neg_dice
     plateau_sched = ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=8, min_lr=5e-6,
     )
@@ -897,8 +884,8 @@ def main():
     warmup_done       = False
     epochs_no_improve = 0
     best_model_state  = None
-    ema_neg_dice      = None
-    encoder_frozen    = False
+    ema_neg_dice      = None   # [FIX-43]
+    encoder_frozen    = False  # [FIX-44]
 
     if args.resume and os.path.exists(cfg["crash_checkpoint"]):
         print(f"Resuming from: {cfg['crash_checkpoint']}")
@@ -932,30 +919,33 @@ def main():
         current_lr      = optimizer.param_groups[0]["lr"]
         do_hd           = (epoch % HD_EVAL_EVERY == 0) and not args.fast
         presence_weight = get_presence_weight(epoch)
-        hd_weight       = get_hd_loss_weight(epoch)
 
-        # [FIX-44] freeze at epoch 1
+        # [FIX-44] Freeze encoder at epoch 1
         if epoch == 1 and not encoder_frozen:
             set_encoder_trainable(model, False)
             encoder_frozen = True
 
-        # [FIX-44/45/46] unfreeze + reset at boundary
+        # [FIX-44/45/46] Unfreeze and reset state at boundary epoch
         if epoch == FREEZE_ENCODER_EPOCHS + 1 and encoder_frozen:
             set_encoder_trainable(model, True)
             encoder_frozen = False
 
-            print(f"  [FIX-45] Resetting best_dice ({best_dice:.4f}→0.0) "
-                  f"and no-improve ({epochs_no_improve}→0).")
+            # [FIX-45] Reset early-stop state — frozen phase optimum is
+            # not representative of the joint encoder+decoder optimum
+            print(f"  [FIX-45] Resetting best_dice "
+                  f"({best_dice:.4f}→0.0) and no-improve "
+                  f"({epochs_no_improve}→0) at encoder unfreeze.")
             best_dice         = 0.0
             epochs_no_improve = 0
             best_model_state  = None
 
+            # [FIX-46] Reset EMA so stale frozen value doesn't skew plateau
             ema_str = f"{ema_neg_dice:.4f}" if ema_neg_dice is not None else "None"
             print(f"  [FIX-46] Resetting EMA neg_dice ({ema_str}→None).")
             ema_neg_dice = None
 
         print(f"\nEpoch {epoch}/{cfg['epochs']}  lr={current_lr:.2e}"
-              f"  pw={presence_weight:.3f}  bw={hd_weight:.3f}"
+              f"  presence_w={presence_weight:.3f}"
               + ("  [encoder frozen]" if encoder_frozen else "")
               + ("  [+HD]" if do_hd else ""))
 
@@ -970,13 +960,12 @@ def main():
             model, val_loader, criterion, device,
             fast=args.fast, epoch=epoch, compute_hd=do_hd,
             presence_weight=presence_weight,
-            hd_weight=hd_weight,
         )
 
-        # [FIX-43/50] EMA smooth neg_dice
+        # [FIX-43/50] EMA smooth neg_dice — alpha=0.6 tracks current closely
         if not np.isnan(neg_dice_raw):
             if ema_neg_dice is None:
-                ema_neg_dice = neg_dice_raw
+                ema_neg_dice = neg_dice_raw  # bias-free init
             else:
                 ema_neg_dice = (EMA_ALPHA * neg_dice_raw
                                 + (1 - EMA_ALPHA) * ema_neg_dice)
@@ -988,6 +977,7 @@ def main():
         if epoch <= warmup_epochs:
             warmup_sched.step()
         elif not encoder_frozen:
+            # [FIX-47] Only step plateau after encoder is unfrozen
             warmup_done = True
             if not np.isnan(neg_dice_for_plateau):
                 plateau_sched.step(neg_dice_for_plateau)
@@ -1032,13 +1022,12 @@ def main():
         )
 
         # TensorBoard
-        writer.add_scalar("Epoch/train_loss",       train_loss,       epoch)
-        writer.add_scalar("Epoch/val_loss",         val_loss,         epoch)
-        writer.add_scalar("Epoch/lr",               current_lr,       epoch)
-        writer.add_scalar("Epoch/best_threshold",   best_threshold,   epoch)
-        writer.add_scalar("Epoch/presence_weight",  presence_weight,  epoch)
-        writer.add_scalar("Epoch/boundary_weight",  hd_weight,        epoch)
-        writer.add_scalar("Epoch/encoder_frozen",   float(encoder_frozen), epoch)
+        writer.add_scalar("Epoch/train_loss",      train_loss,      epoch)
+        writer.add_scalar("Epoch/val_loss",        val_loss,        epoch)
+        writer.add_scalar("Epoch/lr",              current_lr,      epoch)
+        writer.add_scalar("Epoch/best_threshold",  best_threshold,  epoch)
+        writer.add_scalar("Epoch/presence_weight", presence_weight, epoch)
+        writer.add_scalar("Epoch/encoder_frozen",  float(encoder_frozen), epoch)
         writer.add_scalar("Epoch/epochs_no_improve", epochs_no_improve, epoch)
         if ema_neg_dice is not None:
             writer.add_scalar("Epoch/ema_neg_dice", ema_neg_dice, epoch)
@@ -1100,7 +1089,8 @@ def main():
                   f"composite={fmt(composite)}, "
                   f"threshold={best_threshold:.2f}) → {cfg['checkpoint']}")
         else:
-            if not encoder_frozen:   # [FIX-45]
+            # [FIX-45] Only burn patience when encoder is unfrozen
+            if not encoder_frozen:
                 epochs_no_improve += 1
 
         # Crash checkpoint
@@ -1128,7 +1118,6 @@ def main():
             "val_loss"         : val_loss,
             "best_threshold"   : best_threshold,
             "presence_weight"  : presence_weight,
-            "boundary_weight"  : hd_weight,
             "epochs_no_improve": epochs_no_improve,
             "ema_neg_dice"     : ema_neg_dice,
             "encoder_frozen"   : encoder_frozen,
@@ -1140,7 +1129,7 @@ def main():
         with open(cfg["log_file"], "w") as f:
             json.dump(log_history, f, indent=2)
 
-        # [FIX-36/48] Early stopping
+        # [FIX-36/48] Early stopping — gated by unfreeze + min_epochs [FIX-42]
         if (epochs_no_improve >= EARLY_STOP_PATIENCE
                 and epoch >= MIN_EPOCHS
                 and not encoder_frozen
