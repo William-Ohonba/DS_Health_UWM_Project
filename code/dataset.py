@@ -7,7 +7,6 @@ FIXES applied:
   [FIX-5]  /tmp/ split CSVs are now named with the n_slices + img_size
            suffix so parallel runs (n_slices=3 vs 5, img_size=320 vs 448)
            no longer overwrite each other's val split mid-epoch.
-<<<<<<< HEAD
   [FIX-7]  Augmentation now passes a 2-D binary union mask as `mask` (for
            MaskAwareRandomCrop anchor sampling) and the full (H,W,C) array
            as `multichan` via additional_targets.
@@ -25,16 +24,6 @@ FIXES applied:
            frequency in train.py) already compensate for class imbalance at
            the gradient level; the sampler was redundant with those weights
            and actively harmful to calibration. Replaced with shuffle=True.
-=======
-           Previously both runs wrote to the same /tmp/gi_train_split.csv,
-           silently corrupting the val set of whichever started second.
-  [FIX-7]  Augmentation now passes a 2-D binary union mask as `mask` (for
-           MaskAwareRandomCrop anchor sampling) and the full (H,W,C) array
-           as `multichan` via additional_targets.  Previously the raw
-           (H,W,3) array arrived in `params["mask"]`, making argwhere
-           return (row, col, channel) triples and silently disabling
-           mask-focused cropping on every training sample.
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
 """
 
 import os
@@ -145,21 +134,7 @@ class GITractDataset(Dataset):
         else:
             self.mean = self.std = None
 
-<<<<<<< HEAD
         self.ids = self.df["id"].unique()
-=======
-        self.ids     = self.df["id"].unique()
-        self.weights = self._compute_weights()
-
-    def _compute_weights(self):
-        """Upweight slices that contain at least one organ (5:1 ratio)."""
-        mask_present = (
-            self.df.groupby("id")["segmentation"]
-            .apply(lambda x: x.notna().any())
-        )
-        return [5.0 if mask_present.get(sid, False) else 1.0
-                for sid in self.ids]
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
 
     def _parse_id(self, sample_id: str):
         parts    = sample_id.split("_")
@@ -244,11 +219,7 @@ class GITractDataset(Dataset):
                 mask      = union_mask,      # 2-D for anchor sampling
                 multichan = multichan_hw,    # full (H,W,3) gets same spatial tx
             )
-<<<<<<< HEAD
             aug_mid  = result["image"]                         # (new_H, new_W)
-=======
-            aug_mid  = result["image"]                       # (new_H, new_W)
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
             mask     = result["multichan"].transpose(2, 0, 1)  # (3, new_H, new_W)
 
             new_h, new_w = aug_mid.shape
@@ -276,7 +247,6 @@ class GITractDataset(Dataset):
 def get_dataloaders(
     csv_path:      str,
     folder_path:   str,
-<<<<<<< HEAD
     img_size:      int   = 320,
     batch_size:    int   = 16,
     n_slices:      int   = 3,
@@ -297,17 +267,6 @@ def get_dataloaders(
     Replaced with shuffle=True. Loss class weights in train.py compensate
     for pixel-level class imbalance without distorting the slice distribution.
     """
-=======
-    img_size:      int  = 320,
-    batch_size:    int  = 16,
-    n_slices:      int  = 3,
-    stats_path:    str  = "calcStats.json",
-    train_augment        = None,
-    val_split:     float = 0.2,
-    num_workers:   int  = 4,
-):
-    """Build train and validation DataLoaders with weighted sampling."""
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
     df      = pd.read_csv(csv_path)
     all_ids = df["id"].unique()
     n_val   = int(len(all_ids) * val_split)
@@ -332,7 +291,6 @@ def get_dataloaders(
     val_ds   = GITractDataset(val_csv,   folder_path, img_size, stats_path,
                               None,        n_slices, "val")
 
-<<<<<<< HEAD
     # [FIX-30] shuffle=True replaces WeightedRandomSampler.
     # The sampler was causing a train/val distribution mismatch that made
     # the model's optimal threshold oscillate; see module docstring.
@@ -344,22 +302,6 @@ def get_dataloaders(
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=pin_memory,   # [FIX-22]
-=======
-    sampler = WeightedRandomSampler(
-        weights     = torch.tensor(train_ds.weights, dtype=torch.float64),
-        num_samples = len(train_ds),
-        replacement = True,
-    )
-
-    train_loader = DataLoader(
-        train_ds, batch_size=batch_size, sampler=sampler,
-        num_workers=num_workers, pin_memory=True,
-        persistent_workers=(num_workers > 0),
-    )
-    val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True,
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
         persistent_workers=(num_workers > 0),
     )
     return train_loader, val_loader

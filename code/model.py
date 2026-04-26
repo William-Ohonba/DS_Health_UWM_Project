@@ -5,7 +5,6 @@ model.py — 2.5D U-Net with EfficientNet-B5 backbone
 giving depth context without 3-D conv overhead.
 
 Differential LR (FIX-4) is applied in train.py by accessing:
-<<<<<<< HEAD
     model.model.encoder           → lr = 1e-4   [FIX-23]
     model.model.decoder           → lr = 3e-4   (3× encoder, not 10×)
     model.model.segmentation_head → lr = 3e-4
@@ -25,14 +24,6 @@ FIXES applied:
            gradients at the encoder boundary. The presence head still
            trains (its own parameters receive gradients), but it no longer
            corrupts encoder feature learning.
-=======
-    model.model.encoder           → lr = 3e-5
-    model.model.decoder           → lr = 3e-4
-    model.model.segmentation_head → lr = 3e-4
-These are standard smp.Unet sub-module names.
-
-No functional changes from the previous version.
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
 """
 import torch
 import torch.nn as nn
@@ -53,48 +44,31 @@ class GITractUNet(nn.Module):
         encoder    : SMP encoder backbone name
         pretrained : use ImageNet pretrained weights
         img_size   : kept for API compatibility, unused internally
-<<<<<<< HEAD
         dropout    : dropout probability before segmentation head [FIX-27]
 
     Returns (from forward):
         seg_logits      : [B, n_classes, H, W]  raw segmentation logits
         presence_logits : [B, n_classes]         per-class presence logits [FIX-30]
-=======
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
     """
 
     def __init__(
         self,
-<<<<<<< HEAD
         n_slices:   int   = 3,
         n_classes:  int   = 3,
         encoder:    str   = "efficientnet-b5",
         pretrained: bool  = True,
         img_size:   int   = 320,
         dropout:    float = 0.2,
-=======
-        n_slices:   int  = 3,
-        n_classes:  int  = 3,
-        encoder:    str  = "efficientnet-b5",
-        pretrained: bool = True,
-        img_size:   int  = 320,
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
     ):
         super().__init__()
         self.n_slices  = n_slices
         self.n_classes = n_classes
 
-<<<<<<< HEAD
-=======
-        # SMP handles in_channels != 3 by averaging pretrained weights
-        # across the new channel dimension — no manual adaptation needed.
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
         self.model = smp.Unet(
             encoder_name    = encoder,
             encoder_weights = "imagenet" if pretrained else None,
             in_channels     = n_slices,
             classes         = n_classes,
-<<<<<<< HEAD
             activation      = None,
         )
 
@@ -140,20 +114,6 @@ def build_model(n_slices:   int   = 3,
                 pretrained: bool  = True,
                 device:     str   = "cuda",
                 dropout:    float = 0.2) -> GITractUNet:
-=======
-            activation      = None,   # raw logits; sigmoid applied in loss
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: [B, n_slices, H, W]  →  logits: [B, n_classes, H, W]"""
-        return self.model(x)
-
-
-def build_model(n_slices:   int  = 3,
-                n_classes:  int  = 3,
-                pretrained: bool = True,
-                device:     str  = "cuda") -> GITractUNet:
->>>>>>> 67bb389d7e8ec687515fe68ebf11894c61af46c5
     """Factory — returns model on the specified device."""
     model = GITractUNet(
         n_slices   = n_slices,
