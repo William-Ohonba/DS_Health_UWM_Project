@@ -8,11 +8,12 @@ This is the repo will all our stuff for the UWM Project submission
 6) go to code folder
 7) python3 train.py --n_slices 3    - for training on 3 slices
 8) python3 train.py --n_slices 5    - for training on 5 slices
-9) If you want to activate tensorboard
-10) open a new window ssh to classroom machines and activate your virtual environment with uv then use tmux command again
-11) when in tmux environment press ctrl + b then pause and press c
-12) go to train.py
-13) run tensorboard --logdir runs/
-14) on local machine use 
+9) python3 train.py --n_slices 3 --upscale - upscaled on 3 slices
+10) If you want to activate tensorboard
+11) open a new window ssh to classroom machines and activate your virtual environment with uv then use tmux command again
+12) when in tmux environment press ctrl + b then pause and press c
+13) go to train.py
+14) run tensorboard --logdir runs/
+15) on local machine use 
 16) ssh -L (domain_number):localhost:(domain_number) (username)@pamd.sc.fsu.edu -t ssh -L (domain_number):localhost:(domain_number) (username)@(classmachine_number).sc.fsu.edu
 17) then on your browser paste http://localhost:(domain_number)/
