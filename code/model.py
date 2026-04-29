@@ -4,26 +4,6 @@ model.py — 2.5D U-Net with EfficientNet-B5 backbone
 2.5D: input is [B, n_slices, H, W] — adjacent slices stacked as channels,
 giving depth context without 3-D conv overhead.
 
-Differential LR (FIX-4) is applied in train.py by accessing:
-    model.model.encoder           → lr = 1e-4   [FIX-23]
-    model.model.decoder           → lr = 3e-4   (3× encoder, not 10×)
-    model.model.segmentation_head → lr = 3e-4
-
-FIXES applied:
-  [FIX-27] Dropout(0.2) injected before the segmentation head.
-  [FIX-30] Auxiliary presence detection head added.
-  [FIX-31] presence_head now operates on DETACHED encoder features.
-           Previously presence gradients flowed back through the full
-           encoder (2048-channel deepest feature map), contributing ~30%
-           of total encoder gradient signal and actively competing with
-           segmentation gradients during the critical first 10–15 epochs
-           when encoder features are forming. This caused the encoder to
-           oscillate between "segment" and "classify presence" objectives,
-           producing the loss spikes and dice collapses observed at epochs
-           14, 19, 21, 29. Fix: features[-1].detach() stops all presence
-           gradients at the encoder boundary. The presence head still
-           trains (its own parameters receive gradients), but it no longer
-           corrupts encoder feature learning.
 """
 import torch
 import torch.nn as nn

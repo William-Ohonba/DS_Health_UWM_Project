@@ -1,20 +1,6 @@
 """
 loss.py — Combined BCE + Dice Loss and evaluation metrics
 
-FIXES applied:
-  [FIX-3]  DiceLoss smooth: 1.0 → 1e-6. Near-zero preds now yield loss≈1.0
-           instead of ≈0.0, restoring Dice gradient signal early in training.
-  [FIX-7]  hausdorff_distance_2d exported so train.py validate() can import
-           and call it directly per-item per-class.
-  [FIX-11] hausdorff_distance_2d returns None (not 0.0) when both masks are
-           empty, so callers skip the pair from the HD mean.
-  [FIX-26] compute_metrics uses smooth=1.0 in the METRIC (not the loss) so
-           small-structure classes don't report a misleadingly near-zero Dice.
-  [FIX-32] DiceLoss smooth raised from 1e-6 → 1e-4.
-           With 57% empty slices, smooth=1e-6 caused loss→0 on both-empty
-           pairs, making "predict nothing" a local optimum. 1e-4 keeps a
-           gradient signal flowing without materially affecting non-empty
-           predictions. The metric still uses smooth=1.0 (FIX-26).
 """
 
 import torch

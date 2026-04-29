@@ -1,50 +1,6 @@
 """
 augmentations.py — Albumentations pipeline for GI Tract segmentation
 
-FIXES applied:
-  [FIX-7]  MaskAwareRandomCrop anchor sampling now uses a 2-D binary union
-           mask (max across channels) instead of the raw multi-channel array.
-           Previously dataset.py passed mask.transpose(1,2,0) → (H,W,3) into
-           the augment() call, and Albumentations forwarded that full 3-D array
-           to get_params_dependent_on_targets(). np.argwhere on an (H,W,3)
-           array returns (row, col, channel) triples, so the crop anchor was
-           sampled from nonsense coordinates, silently falling back to random
-           cropping on almost every sample. Fix: dataset.py now passes a
-           pre-computed 2-D union_mask via additional_targets and the crop
-           class reads that clean 2-D array for anchor sampling.
-
-  [FIX-8]  GaussNoise: removed the deprecated `var_limit` kwarg; replaced
-           with `std_range=(0.04, 0.22)` which is the correct API for
-           Albumentations >= 1.4 and silences the UserWarning that was
-           printed at the start of every training run.
-
-  [FIX-18] ElasticTransform: removed `alpha_affine=3` kwarg which was dropped
-           in albumentations >= 1.4 and either silently ignored or raised a
-           TypeError depending on the exact version installed.
-           OpticalDistortion: replaced `shift_limit=0.1` with
-           `shift_limit_x=0.1, shift_limit_y=0.1` per the new API introduced
-           in albumentations >= 1.4. The old kwarg was silently ignored,
-           meaning optical distortion ran without any shift, producing weaker
-           augmentation than intended.
-
-  [FIX-33] ShiftScaleRotate replaced with A.Affine.
-           ShiftScaleRotate is now a restricted alias of Affine in
-           albumentations >= 1.4 and emits a UserWarning on every import.
-           A.Affine is the canonical replacement and accepts the same
-           logical parameters (translate_percent, scale, rotate) with a
-           cleaner API. `value` and `mask_value` are not valid kwargs on
-           Affine — border fill is controlled via `cval` (image) and
-           `cval_mask` (mask).
-
-  [FIX-34] ElasticTransform, GridDistortion, OpticalDistortion: removed
-           `value` and `mask_value` kwargs. These were silently dropped in
-           albumentations >= 1.4; the correct kwargs are `fill` (image fill
-           value) and `fill_mask` (mask fill value). Updated all three
-           transforms accordingly.
-
-Pipeline is applied to the CENTER slice + all masks inside dataset.py.
-Neighbor slices are spatially resized to match augmented dims but do not
-receive intensity augmentations (FIX-1 — unchanged from previous version).
 """
 
 import albumentations as A

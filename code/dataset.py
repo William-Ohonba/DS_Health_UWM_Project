@@ -1,29 +1,6 @@
 """
 dataset.py — GI Tract Segmentation DataLoader
 
-FIXES applied:
-  [FIX-1]  Augmentation no longer zeros neighbor slices.
-  [FIX-2]  calc_stats runs on CLAHE-processed images.
-  [FIX-5]  /tmp/ split CSVs are now named with the n_slices + img_size
-           suffix so parallel runs (n_slices=3 vs 5, img_size=320 vs 448)
-           no longer overwrite each other's val split mid-epoch.
-  [FIX-7]  Augmentation now passes a 2-D binary union mask as `mask` (for
-           MaskAwareRandomCrop anchor sampling) and the full (H,W,C) array
-           as `multichan` via additional_targets.
-  [FIX-22] get_dataloaders() now accepts a `pin_memory` parameter and passes
-           it through to both DataLoaders.
-  [FIX-25] WeightedRandomSampler positive weight reduced from 5.0 → 2.0.
-  [FIX-30] WeightedRandomSampler removed entirely.
-           The 2:1 positive oversampling (FIX-25) still caused a systematic
-           train/val calibration mismatch: the model trained on ~67% positive
-           slices but validated on ~43% (natural distribution, 57% empty GT).
-           This was the primary cause of the optimal threshold oscillating
-           between 0.35 and 0.50 epoch-to-epoch and empty_pred% swinging
-           26%→50%: the model's sigmoid outputs were calibrated for the wrong
-           prior at validation time. Loss class weights (computed per pixel
-           frequency in train.py) already compensate for class imbalance at
-           the gradient level; the sampler was redundant with those weights
-           and actively harmful to calibration. Replaced with shuffle=True.
 """
 
 import os
